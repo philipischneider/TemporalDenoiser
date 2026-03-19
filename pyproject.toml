@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "temporal-denoiser"
+version = "0.1.0"
+description = "Temporal denoiser for Blender OpenEXR Multilayer renders"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+    "OpenEXR>=3.2",
+    "openimagedenoise>=2.3",
+]
+
+[project.scripts]
+temporal-denoiser = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

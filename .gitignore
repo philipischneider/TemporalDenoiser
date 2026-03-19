@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.idea/
+.vscode/
+*.swp
+optix_bridge/build/
+optix_bridge/*.exe
+*.tmp
+*.npy.tmp
