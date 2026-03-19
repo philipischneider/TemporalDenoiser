@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel, QGroupBox, QHBoxLayout, QScrollArea,
     QFrame, QFileDialog,
 )
+from typing import List
 from PySide6.QtCore import Qt
 
 from core.pipeline import PipelineConfig
@@ -117,24 +118,25 @@ class SettingsPanel(QScrollArea):
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignRight)
 
-        tip = QLabel(
-            "Enter the exact pass name as it appears in the EXR.\n"
-            "Leave blank to disable that guide."
-        )
-        tip.setStyleSheet("color: #888; font-size: 10px;")
-        tip.setWordWrap(True)
-        form.addRow(tip)
+        self._passes_tip = QLabel("Select an input folder to load available passes.")
+        self._passes_tip.setStyleSheet("color: #888; font-size: 10px;")
+        self._passes_tip.setWordWrap(True)
+        form.addRow(self._passes_tip)
 
-        self._pass_noisy = QLineEdit("Combined")
+        self._pass_noisy = QComboBox()
+        self._pass_noisy.setToolTip("Pass used as the noisy input (required)")
         form.addRow("Noisy pass:", self._pass_noisy)
 
-        self._pass_albedo = QLineEdit("Denoising Albedo")
+        self._pass_albedo = QComboBox()
+        self._pass_albedo.setToolTip("Albedo guide pass (optional but recommended)")
         form.addRow("Albedo pass:", self._pass_albedo)
 
-        self._pass_normal = QLineEdit("Denoising Normal")
+        self._pass_normal = QComboBox()
+        self._pass_normal.setToolTip("Normal guide pass (optional but recommended)")
         form.addRow("Normal pass:", self._pass_normal)
 
-        self._pass_vector = QLineEdit("Vector")
+        self._pass_vector = QComboBox()
+        self._pass_vector.setToolTip("Motion vector pass for temporal reprojection (optional)")
         form.addRow("Vector pass:", self._pass_vector)
 
         return box
@@ -195,11 +197,59 @@ class SettingsPanel(QScrollArea):
     def set_output_folder(self, path: str) -> None:
         self._output_picker.set_value(path)
 
+    def populate_passes(self, layers: list[str]) -> None:
+        """Fill pass dropdowns with detected EXR layers and auto-select best matches."""
+        none_label = "(none)"
+
+        # Keywords used for auto-selection (checked in order, case-insensitive)
+        _AUTO = {
+            "noisy":  ["noisy image", "combined", "beauty", "rgba"],
+            "albedo": ["albedo", "diffuse color", "denoising albedo"],
+            "normal": ["normal", "denoising normal"],
+            "vector": ["vector", "speed", "motion"],
+        }
+
+        def best_match(keywords: list[str]) -> str:
+            for kw in keywords:
+                for layer in layers:
+                    if kw in layer.lower():
+                        return layer
+            return ""
+
+        def fill(combo: QComboBox, required: bool, keywords: list[str]) -> None:
+            combo.blockSignals(True)
+            combo.clear()
+            if not required:
+                combo.addItem(none_label)
+            combo.addItems(layers)
+            match = best_match(keywords)
+            if match:
+                idx = combo.findText(match)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            elif required and layers:
+                combo.setCurrentIndex(0 if required else 1)
+            combo.blockSignals(False)
+
+        fill(self._pass_noisy,  required=True,  keywords=_AUTO["noisy"])
+        fill(self._pass_albedo, required=False, keywords=_AUTO["albedo"])
+        fill(self._pass_normal, required=False, keywords=_AUTO["normal"])
+        fill(self._pass_vector, required=False, keywords=_AUTO["vector"])
+
+        count = len(layers)
+        self._passes_tip.setText(f"{count} pass{'es' if count != 1 else ''} detected. Adjust selections as needed.")
+        self._passes_tip.setStyleSheet("color: #6ec26e; font-size: 10px;")
+
     def build_config(self) -> PipelineConfig | None:
+        none_label = "(none)"
         try:
             vector_scale = float(self._vector_scale_edit.text())
         except ValueError:
             vector_scale = 1.0
+
+        def pass_value(combo: QComboBox) -> str:
+            text = combo.currentText()
+            return "" if text == none_label else text
 
         return PipelineConfig(
             input_folder=Path(self._input_picker.value()),
@@ -211,8 +261,8 @@ class SettingsPanel(QScrollArea):
             temporal=self._temporal_check.isChecked(),
             temporal_blend=self._blend_slider.value() / 100.0,
             vector_scale=vector_scale,
-            pass_noisy=self._pass_noisy.text().strip() or "Combined",
-            pass_albedo=self._pass_albedo.text().strip(),
-            pass_normal=self._pass_normal.text().strip(),
-            pass_vector=self._pass_vector.text().strip(),
+            pass_noisy=pass_value(self._pass_noisy) or "Combined",
+            pass_albedo=pass_value(self._pass_albedo),
+            pass_normal=pass_value(self._pass_normal),
+            pass_vector=pass_value(self._pass_vector),
         )

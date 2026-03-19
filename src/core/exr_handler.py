@@ -85,6 +85,35 @@ class ExrFrame:
 
 
 # ---------------------------------------------------------------------------
+# Layer discovery (header only — no pixel data loaded)
+# ---------------------------------------------------------------------------
+
+def list_exr_layers(path: Path) -> List[str]:
+    """Return sorted unique layer names from a multilayer EXR header.
+
+    Reads only the file header (fast, no pixel data). Useful for populating
+    UI dropdowns before any denoising starts.
+    """
+    if not _HAS_OPENEXR:
+        raise ImportError("OpenEXR Python package is not installed.")
+
+    exr = OpenEXR.InputFile(str(path))
+    header = exr.header()
+    exr.close()
+
+    layers: set[str] = set()
+    for channel_name in header["channels"].keys():
+        parts = channel_name.rsplit(".", 1)
+        if len(parts) == 2:
+            layer_name = _normalize_layer_name(parts[0])
+        else:
+            layer_name = "default"
+        layers.add(layer_name)
+
+    return sorted(layers)
+
+
+# ---------------------------------------------------------------------------
 # Reading
 # ---------------------------------------------------------------------------
 

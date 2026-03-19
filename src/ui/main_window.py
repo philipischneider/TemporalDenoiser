@@ -14,6 +14,8 @@ import numpy as np
 from ui.widgets.settings_panel import SettingsPanel
 from ui.widgets.progress_panel import ProgressPanel
 from core.pipeline import DenoisePipeline, PipelineConfig, PipelineWorker
+from core.exr_handler import list_exr_layers
+from utils.frame_sequence import detect_frame_sequence
 
 
 class PreviewLabel(QLabel):
@@ -159,7 +161,24 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_input_changed(self, path: str) -> None:
-        self.status_bar.showMessage(f"Input: {path}")
+        folder = Path(path)
+        if not folder.is_dir():
+            return
+
+        frames = detect_frame_sequence(folder)
+        if not frames:
+            self.status_bar.showMessage(f"Input: {path} — no EXR files found.")
+            return
+
+        self.status_bar.showMessage(f"Input: {path} — {len(frames)} frames. Scanning passes…")
+        try:
+            layers = list_exr_layers(frames[0])
+            self.settings_panel.populate_passes(layers)
+            self.status_bar.showMessage(
+                f"Input: {path} — {len(frames)} frames, {len(layers)} passes detected."
+            )
+        except Exception as e:
+            self.status_bar.showMessage(f"Could not read EXR passes: {e}")
 
     @Slot()
     def _on_start(self) -> None:
