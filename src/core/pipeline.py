@@ -183,24 +183,29 @@ class DenoisePipeline:
             log("No output frames found for video preview.", "warning")
             return
 
-        first = cv2.imread(str(output_files[0]), cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
-        if first is None:
-            log("Could not read output frames for video preview.", "error")
+        try:
+            first_exr = load_exr(output_files[0])
+            first_arr = first_exr.get_layer_rgb("default")
+        except Exception as e:
+            log(f"Could not read output frames for video preview: {e}", "error")
             return
 
-        h, w = first.shape[:2]
+        h, w = first_arr.shape[:2]
         video_path = cfg.output_folder / "preview.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(video_path), fourcc, float(cfg.video_fps), (w, h))
 
         log(f"Creating video preview ({len(output_files)} frames @ {cfg.video_fps} fps)…", "info")
         for path in output_files:
-            frame = cv2.imread(str(path), cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
-            if frame is None:
+            try:
+                exr = load_exr(path)
+                arr = exr.get_layer_rgb("default")
+            except Exception:
                 continue
-            frame = np.clip(frame ** (1.0 / 2.2), 0.0, 1.0)
-            frame = (frame * 255).astype(np.uint8)
-            writer.write(frame)
+            arr = np.clip(arr ** (1.0 / 2.2), 0.0, 1.0)
+            arr = (arr * 255).astype(np.uint8)
+            # OpenCV expects BGR
+            writer.write(arr[:, :, ::-1])
 
         writer.release()
         log(f"Video preview saved → {video_path.name}", "success")
