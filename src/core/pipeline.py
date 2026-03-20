@@ -20,10 +20,9 @@ from denoisers.base import BaseDenoiser
 class PipelineConfig:
     input_folder: Path
     output_folder: Path
-    denoiser: str = "oidn"           # "oidn" or "optix"
-    oidn_device: str = "cuda"        # "cuda" or "cpu"
-    oidn_quality: str = "high"  # "high", "balanced", "fast"
     hdr: bool = True
+    video_preview: bool = False
+    video_fps: int = 24
     temporal: bool = True
     temporal_blend: float = 0.8
     vector_scale: float = 1.0
@@ -38,8 +37,6 @@ class PipelineConfig:
             errors.append(f"Input folder does not exist: {self.input_folder}")
         if not self.output_folder or str(self.output_folder).strip() == "":
             errors.append("Output folder is not set.")
-        if self.denoiser not in ("oidn", "optix"):
-            errors.append(f"Unknown denoiser: {self.denoiser}")
         return errors
 
 
@@ -70,7 +67,7 @@ class DenoisePipeline:
             raise RuntimeError(f"No EXR frames found in {cfg.input_folder}")
 
         log(f"Found {len(frames)} frames.", "info")
-        log(f"Denoiser: {cfg.denoiser.upper()}", "info")
+        log("Denoiser: OptiX", "info")
 
         # Build denoiser
         denoiser = self._build_denoiser()
@@ -117,6 +114,13 @@ class DenoisePipeline:
                 disocclusion = detect_disocclusions(flow)
                 validity_mask = (~disocclusion).astype(np.float32)
 
+            # --- diagnostic ---
+            layer = exr._find_layer(cfg.pass_noisy)
+            log(f"  noisy layer channels: {list(layer.channels.keys())}", "info")
+            log(f"  noisy  R:[{noisy[:,:,0].min():.4f},{noisy[:,:,0].max():.4f}]"
+                f"  G:[{noisy[:,:,1].min():.4f},{noisy[:,:,1].max():.4f}]"
+                f"  B:[{noisy[:,:,2].min():.4f},{noisy[:,:,2].max():.4f}]", "info")
+
             # Denoise
             denoised = denoiser.denoise(
                 noisy=noisy,
@@ -125,6 +129,11 @@ class DenoisePipeline:
                 prev_output=warped_prev,
                 flow=flow,
             )
+
+            log(f"  denoised range: [{denoised.min():.4f}, {denoised.max():.4f}]", "info")
+            log(f"  denoised R:[{denoised[:,:,0].min():.4f},{denoised[:,:,0].max():.4f}]"
+                f"  G:[{denoised[:,:,1].min():.4f},{denoised[:,:,1].max():.4f}]"
+                f"  B:[{denoised[:,:,2].min():.4f},{denoised[:,:,2].max():.4f}]", "info")
 
             # Temporal blend (for OIDN which handles temporal internally,
             # this is a secondary soft blend; for custom warp, it's primary)
@@ -155,23 +164,50 @@ class DenoisePipeline:
             progress(frame_num, len(frames), eta)
 
         denoiser.cleanup()
+
+        if cfg.video_preview and not self._stop_requested:
+            self._create_video(frames, cfg, log)
+
         log("Pipeline finished.", "success")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
+    def _create_video(self, frames, cfg: PipelineConfig, log) -> None:
+        import cv2
+
+        output_files = [cfg.output_folder / f.name for f in frames]
+        output_files = [p for p in output_files if p.is_file()]
+        if not output_files:
+            log("No output frames found for video preview.", "warning")
+            return
+
+        first = cv2.imread(str(output_files[0]), cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+        if first is None:
+            log("Could not read output frames for video preview.", "error")
+            return
+
+        h, w = first.shape[:2]
+        video_path = cfg.output_folder / "preview.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(video_path), fourcc, float(cfg.video_fps), (w, h))
+
+        log(f"Creating video preview ({len(output_files)} frames @ {cfg.video_fps} fps)…", "info")
+        for path in output_files:
+            frame = cv2.imread(str(path), cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+            if frame is None:
+                continue
+            frame = np.clip(frame ** (1.0 / 2.2), 0.0, 1.0)
+            frame = (frame * 255).astype(np.uint8)
+            writer.write(frame)
+
+        writer.release()
+        log(f"Video preview saved → {video_path.name}", "success")
+
     def _build_denoiser(self) -> BaseDenoiser:
-        cfg = self.config
-        if cfg.denoiser == "oidn":
-            from denoisers.oidn_denoiser import OIDNDenoiser
-            return OIDNDenoiser(device=cfg.oidn_device, hdr=cfg.hdr,
-                                quality=cfg.oidn_quality, temporal=cfg.temporal)
-        elif cfg.denoiser == "optix":
-            from denoisers.optix_denoiser import OptiXDenoiser
-            return OptiXDenoiser(hdr=cfg.hdr, temporal=cfg.temporal)
-        else:
-            raise ValueError(f"Unknown denoiser: {cfg.denoiser}")
+        from denoisers.optix_denoiser import OptiXDenoiser
+        return OptiXDenoiser(hdr=self.config.hdr, temporal=self.config.temporal)
 
     def _extract_pass(self, exr, name: str, order: str, log) -> Optional[np.ndarray]:
         if not name:

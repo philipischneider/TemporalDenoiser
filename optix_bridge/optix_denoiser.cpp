@@ -296,7 +296,6 @@ int main(int argc, char** argv) {
 
         // --- Invoke ---
         OptixDenoiserParams params = {};
-        params.denoiseAlpha = OPTIX_DENOISER_ALPHA_MODE_COPY;
         if (cfg.hdr) {
             OPTIX_CHECK(optixDenoiserComputeIntensity(
                 denoiser, stream, &layer.input,

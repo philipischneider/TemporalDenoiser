@@ -12,7 +12,7 @@ import numpy as np
 from denoisers.base import BaseDenoiser
 
 # Path to the compiled optix_bridge executable (adjust after building)
-_DEFAULT_BRIDGE = Path(__file__).parents[2] / "optix_bridge" / "build" / "Release" / "optix_bridge.exe"
+_DEFAULT_BRIDGE = Path(__file__).parents[2] / "optix_bridge" / "build" / "Release" / "Release" / "optix_bridge.exe"
 
 
 class OptiXDenoiser(BaseDenoiser):

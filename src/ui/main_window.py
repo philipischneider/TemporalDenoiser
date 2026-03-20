@@ -142,6 +142,7 @@ class MainWindow(QMainWindow):
         self.action_start.triggered.connect(self._on_start)
         self.action_stop.triggered.connect(self._on_stop)
         self.settings_panel.input_changed.connect(self._on_input_changed)
+        self.settings_panel.scan_requested.connect(self._on_scan_passes)
 
     # ------------------------------------------------------------------
     # Slots / helpers
@@ -164,24 +165,52 @@ class MainWindow(QMainWindow):
         folder = Path(path)
         if not folder.is_dir():
             return
-
         frames = detect_frame_sequence(folder)
         if not frames:
             self.status_bar.showMessage(f"Input: {path} — no EXR files found.")
-            return
-
-        self.status_bar.showMessage(f"Input: {path} — {len(frames)} frames. Scanning passes…")
-        try:
-            layers = list_exr_layers(frames[0])
-            self.settings_panel.populate_passes(layers)
+        else:
             self.status_bar.showMessage(
-                f"Input: {path} — {len(frames)} frames, {len(layers)} passes detected."
+                f"Input: {path} — {len(frames)} frame(s) found. Click \"Scan Passes\" to load layers."
             )
+
+    @Slot()
+    def _on_scan_passes(self) -> bool:
+        path = self.settings_panel.get_input_folder()
+        folder = Path(path)
+        if not folder.is_dir():
+            self.status_bar.showMessage("Select a valid input folder before scanning.")
+            return False
+
+        frames = detect_frame_sequence(folder)
+        if not frames:
+            self.status_bar.showMessage(f"No EXR files found in: {path}")
+            return False
+
+        self.status_bar.showMessage(f"Scanning passes in {frames[0].name}…")
+        try:
+            layers, raw_channels = list_exr_layers(frames[0])
+            self.progress_panel.log(
+                f"Scan: {len(raw_channels)} raw channels → {len(layers)} unique layers", "info"
+            )
+            for ch in raw_channels:
+                self.progress_panel.log(f"  channel: {ch}", "info")
+            self.settings_panel.populate_passes(layers, raw_channel_count=len(raw_channels))
+            self.status_bar.showMessage(
+                f"{frames[0].name} — {len(layers)} layer(s) detected ({len(raw_channels)} channels)."
+            )
+            return True
         except Exception as e:
             self.status_bar.showMessage(f"Could not read EXR passes: {e}")
+            self.progress_panel.log(f"Scan error: {e}", "error")
+            return False
 
     @Slot()
     def _on_start(self) -> None:
+        if not self.settings_panel.is_scanned():
+            self.progress_panel.log("Scanning passes automatically…", "info")
+            if not self._on_scan_passes():
+                return
+
         config = self.settings_panel.build_config()
         if config is None:
             return

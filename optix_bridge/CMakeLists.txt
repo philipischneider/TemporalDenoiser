@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
-project(optix_bridge LANGUAGES CXX CUDA)
+project(optix_bridge LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
 
 # -----------------------------------------------------------------------
 # Find CUDA

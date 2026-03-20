@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QLabel, QGroupBox, QHBoxLayout, QScrollArea,
     QFrame, QFileDialog,
 )
-from typing import List
 from PySide6.QtCore import Qt
 
 from core.pipeline import PipelineConfig
@@ -50,9 +49,11 @@ class _FolderPicker(QWidget):
 
 class SettingsPanel(QScrollArea):
     input_changed = Signal(str)
+    scan_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._scanned = False
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
 
@@ -66,6 +67,7 @@ class SettingsPanel(QScrollArea):
         layout.addWidget(self._build_denoiser_group())
         layout.addWidget(self._build_passes_group())
         layout.addWidget(self._build_temporal_group())
+        layout.addWidget(self._build_video_group())
         layout.addStretch()
 
     # ------------------------------------------------------------------
@@ -91,25 +93,12 @@ class SettingsPanel(QScrollArea):
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignRight)
 
-        self._denoiser_combo = QComboBox()
-        self._denoiser_combo.addItems(["OIDN (Intel Open Image Denoise)", "OptiX (NVIDIA)"])
-        self._denoiser_combo.currentIndexChanged.connect(self._on_denoiser_changed)
-        form.addRow("Engine:", self._denoiser_combo)
-
-        self._oidn_device_combo = QComboBox()
-        self._oidn_device_combo.addItems(["CUDA (GPU)", "CPU"])
-        form.addRow("OIDN Device:", self._oidn_device_combo)
-
-        self._oidn_prefilter_combo = QComboBox()
-        self._oidn_prefilter_combo.addItems(["high", "balanced", "fast"])
-        form.addRow("Quality:", self._oidn_prefilter_combo)
+        engine_label = QLabel("OptiX (NVIDIA)")
+        form.addRow("Engine:", engine_label)
 
         self._hdr_check = QCheckBox("HDR mode (linear float)")
         self._hdr_check.setChecked(True)
         form.addRow("", self._hdr_check)
-
-        self._oidn_device_label = form.labelForField(self._oidn_device_combo)
-        self._oidn_prefilter_label = form.labelForField(self._oidn_prefilter_combo)
 
         return box
 
@@ -118,10 +107,15 @@ class SettingsPanel(QScrollArea):
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignRight)
 
-        self._passes_tip = QLabel("Select an input folder to load available passes.")
+        self._passes_tip = QLabel("Select an input folder, then click \"Scan Passes\".")
         self._passes_tip.setStyleSheet("color: #888; font-size: 10px;")
         self._passes_tip.setWordWrap(True)
         form.addRow(self._passes_tip)
+
+        self._scan_btn = QPushButton("Scan Passes")
+        self._scan_btn.setToolTip("Read EXR layers from the first file in the input folder")
+        self._scan_btn.clicked.connect(self.scan_requested)
+        form.addRow("", self._scan_btn)
 
         self._pass_noisy = QComboBox()
         self._pass_noisy.setToolTip("Pass used as the noisy input (required)")
@@ -174,36 +168,46 @@ class SettingsPanel(QScrollArea):
 
         return box
 
-    # ------------------------------------------------------------------
-    # Slots
-    # ------------------------------------------------------------------
+    def _build_video_group(self) -> QGroupBox:
+        box = QGroupBox("Video Preview")
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignRight)
 
-    def _on_denoiser_changed(self, index: int) -> None:
-        is_oidn = index == 0
-        self._oidn_device_combo.setVisible(is_oidn)
-        self._oidn_prefilter_combo.setVisible(is_oidn)
-        if self._oidn_device_label:
-            self._oidn_device_label.setVisible(is_oidn)
-        if self._oidn_prefilter_label:
-            self._oidn_prefilter_label.setVisible(is_oidn)
+        self._video_check = QCheckBox("Create video preview after denoising")
+        self._video_check.setChecked(False)
+        form.addRow("", self._video_check)
+
+        self._video_fps_edit = QLineEdit("24")
+        self._video_fps_edit.setToolTip("Frames per second for the output video")
+        form.addRow("FPS:", self._video_fps_edit)
+
+        return box
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    def is_scanned(self) -> bool:
+        return self._scanned
+
     def set_input_folder(self, path: str) -> None:
+        self._scanned = False
         self._input_picker.set_value(path)
 
     def set_output_folder(self, path: str) -> None:
         self._output_picker.set_value(path)
 
-    def populate_passes(self, layers: list[str]) -> None:
+    def get_input_folder(self) -> str:
+        return self._input_picker.value()
+
+    def populate_passes(self, layers: list[str], raw_channel_count: int = 0) -> None:
+        self._scanned = True
         """Fill pass dropdowns with detected EXR layers and auto-select best matches."""
         none_label = "(none)"
 
         # Keywords used for auto-selection (checked in order, case-insensitive)
         _AUTO = {
-            "noisy":  ["noisy image", "combined", "beauty", "rgba"],
+            "noisy":  ["noisy image", "combined", "beauty", "rgba", "image"],
             "albedo": ["albedo", "diffuse color", "denoising albedo"],
             "normal": ["normal", "denoising normal"],
             "vector": ["vector", "speed", "motion"],
@@ -237,7 +241,10 @@ class SettingsPanel(QScrollArea):
         fill(self._pass_vector, required=False, keywords=_AUTO["vector"])
 
         count = len(layers)
-        self._passes_tip.setText(f"{count} pass{'es' if count != 1 else ''} detected. Adjust selections as needed.")
+        detail = f" ({raw_channel_count} raw channels)" if raw_channel_count else ""
+        self._passes_tip.setText(
+            f"{count} layer{'s' if count != 1 else ''} detected{detail}. Adjust selections as needed."
+        )
         self._passes_tip.setStyleSheet("color: #6ec26e; font-size: 10px;")
 
     def build_config(self) -> PipelineConfig | None:
@@ -251,12 +258,14 @@ class SettingsPanel(QScrollArea):
             text = combo.currentText()
             return "" if text == none_label else text
 
+        try:
+            video_fps = max(1, int(self._video_fps_edit.text()))
+        except ValueError:
+            video_fps = 24
+
         return PipelineConfig(
             input_folder=Path(self._input_picker.value()),
             output_folder=Path(self._output_picker.value()),
-            denoiser="oidn" if self._denoiser_combo.currentIndex() == 0 else "optix",
-            oidn_device="cuda" if self._oidn_device_combo.currentIndex() == 0 else "cpu",
-            oidn_quality=self._oidn_prefilter_combo.currentText(),
             hdr=self._hdr_check.isChecked(),
             temporal=self._temporal_check.isChecked(),
             temporal_blend=self._blend_slider.value() / 100.0,
@@ -265,4 +274,6 @@ class SettingsPanel(QScrollArea):
             pass_albedo=pass_value(self._pass_albedo),
             pass_normal=pass_value(self._pass_normal),
             pass_vector=pass_value(self._pass_vector),
+            video_preview=self._video_check.isChecked(),
+            video_fps=video_fps,
         )
