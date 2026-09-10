@@ -11,8 +11,9 @@ dependencies = [
     "PySide6>=6.6",
     "numpy>=1.26",
     "opencv-python>=4.9",
-    "OpenEXR>=3.2",
 ]
+# OpenImageIO is also required for EXR I/O but isn't reliably pip-installable
+# on Windows; install it separately (see requirements.txt).
 
 [project.scripts]
 temporal-denoiser = "main:main"

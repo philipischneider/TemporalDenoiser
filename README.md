@@ -64,7 +64,7 @@ TemporalDenoiser/
 PySide6 >= 6.6
 numpy >= 1.26
 opencv-python >= 4.9
-OpenEXR >= 3.2
+OpenImageIO
 ```
 
 Install with:
@@ -74,8 +74,11 @@ pip install -e .
 
 Or manually:
 ```bash
-pip install PySide6 numpy opencv-python OpenEXR
+pip install PySide6 numpy opencv-python
 ```
+
+`OpenImageIO`'s Python bindings aren't reliably pip-installable on Windows —
+install via conda-forge instead: `conda install -c conda-forge openimageio`.
 
 ### OptiX C++ bridge
 

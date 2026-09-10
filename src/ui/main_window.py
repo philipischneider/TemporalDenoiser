@@ -13,7 +13,7 @@ import numpy as np
 
 from ui.widgets.settings_panel import SettingsPanel
 from ui.widgets.progress_panel import ProgressPanel
-from core.pipeline import DenoisePipeline, PipelineConfig, PipelineWorker
+from core.pipeline import DenoisePipeline, PipelineConfig, PipelineWorker, InterpolateWorker
 from core.exr_handler import list_exr_layers
 from utils.frame_sequence import detect_frame_sequence
 
@@ -53,6 +53,8 @@ class MainWindow(QMainWindow):
 
         self._worker: PipelineWorker | None = None
         self._thread: QThread | None = None
+        self._interp_worker: InterpolateWorker | None = None
+        self._interp_thread: QThread | None = None
 
         self._build_ui()
         self._build_toolbar()
@@ -220,13 +222,37 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Configuration Error", "\n".join(errors))
             return
 
-        self._start_pipeline(config)
+        if config.interpolate:
+            self._start_interpolation(config)
+        else:
+            self._start_pipeline(config)
 
     @Slot()
     def _on_stop(self) -> None:
         if self._worker:
             self._worker.request_stop()
+        if self._interp_worker:
+            self._interp_worker.request_stop()
         self.action_stop.setEnabled(False)
+
+    def _start_interpolation(self, config: PipelineConfig) -> None:
+        self.action_start.setEnabled(False)
+        self.action_stop.setEnabled(True)
+        self.progress_panel.reset()
+        self.progress_panel.log("Starting interpolation pipeline…", "info")
+
+        self._interp_thread = QThread(self)
+        self._interp_worker = InterpolateWorker(config)
+        self._interp_worker.moveToThread(self._interp_thread)
+
+        self._interp_thread.started.connect(self._interp_worker.run)
+        self._interp_worker.finished.connect(self._on_interp_finished)
+        self._interp_worker.error.connect(self._on_pipeline_error)
+        self._interp_worker.progress.connect(self.progress_panel.update_progress)
+        self._interp_worker.log_message.connect(self.progress_panel.log)
+        self._interp_worker.frame_ready.connect(self._on_frame_ready)
+
+        self._interp_thread.start()
 
     def _start_pipeline(self, config: PipelineConfig) -> None:
         self.action_start.setEnabled(False)
@@ -251,6 +277,18 @@ class MainWindow(QMainWindow):
     def _on_frame_ready(self, frame_num: int, image: np.ndarray) -> None:
         self.frame_info_label.setText(f"Frame: {frame_num:04d}")
         self.preview.set_image_array(image)
+
+    @Slot()
+    def _on_interp_finished(self) -> None:
+        if self._interp_thread:
+            self._interp_thread.quit()
+            self._interp_thread.wait(5000)
+        self._interp_worker = None
+        self._interp_thread = None
+        self.action_start.setEnabled(True)
+        self.action_stop.setEnabled(False)
+        self.status_bar.showMessage("Interpolation complete.")
+        self.progress_panel.log("Done.", "success")
 
     @Slot()
     def _on_pipeline_finished(self) -> None:

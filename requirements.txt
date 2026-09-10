@@ -1,8 +1,8 @@
 PySide6>=6.6
 numpy>=1.26
 opencv-python>=4.9
-OpenEXR>=3.2
-# OIDN is loaded at runtime via ctypes from the official SDK DLL.
-# Download: https://github.com/RenderKit/oidn/releases (Windows x64 TGZ)
-# Extract and set the env var: OIDN_PATH=C:\oidn
-# No pip install needed for OIDN itself.
+
+# EXR I/O goes through OpenImageIO (import OpenImageIO as oiio), not the
+# OpenEXR package. OpenImageIO's Python bindings are not reliably
+# pip-installable on Windows; install via conda-forge instead:
+#   conda install -c conda-forge openimageio

@@ -37,6 +37,34 @@ def blender_vector_to_backward_flow(
     return flow.astype(np.float32)
 
 
+def blender_vector_to_forward_flow(
+    vector_layer: np.ndarray,
+    scale: float = 1.0,
+) -> np.ndarray:
+    """Extract forward optical flow from Blender's 4-channel Vector pass (BA channels).
+
+    Blender's Vector pass layout (in pixel space):
+        R, G  = backward motion  (current <- previous)
+        B, A  = forward motion   (current -> next)
+
+    This function returns the B,A channels (indices 2,3) as forward flow.
+
+    Args:
+        vector_layer: (H, W, 4) float32 array from the EXR.
+        scale:        Multiplier applied to the raw pixel-space values.
+
+    Returns:
+        (H, W, 2) float32 array where [..., 0] = dx and [..., 1] = dy.
+        Returns a zero array if fewer than 4 channels are present.
+    """
+    if vector_layer.ndim == 3 and vector_layer.shape[2] >= 4:
+        flow = vector_layer[..., 2:4].copy()
+    else:
+        return np.zeros((*vector_layer.shape[:2], 2), dtype=np.float32)
+    flow *= scale
+    return flow.astype(np.float32)
+
+
 def detect_static_regions(
     flow: np.ndarray,
     threshold: float = 0.5,

@@ -8,7 +8,7 @@ import numpy as np
 
 
 class BaseDenoiser(ABC):
-    """Common interface for OIDN and OptiX denoiser backends."""
+    """Common interface for denoiser backends."""
 
     @abstractmethod
     def denoise(
